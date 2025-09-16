@@ -1,0 +1,83 @@
+@page "/invoices/manage"
+@inject BillingDbContext Db
+@inject IInvoiceService InvoiceSvc
+@inject IInvoicePdfService PdfSvc
+@inject IFileStorage Files
+@inject IEmailSender Email
+@inject NavigationManager Nav
+
+<div class="d-flex justify-content-between align-items-center">
+  <h3>Invoices</h3>
+  <a class="btn btn-success btn-sm" href="/invoices/edit">New Invoice</a>
+</div>
+
+@if (_list is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Id</th><th>No</th><th>Status</th><th>Total</th><th>Customer</th><th>Issued</th><th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var i in _list)
+        {
+            <tr>
+                <td><a href="/invoices/details/@i.Id">@i.Id</a></td>
+                <td>@i.InvoiceNumber</td>
+                <td>@i.Status</td>
+                <td>@i.Total.ToString("N2") @i.Currency</td>
+                <td>@i.Customer?.OrganizationName</td>
+                <td>@(i.IssueDateUtc == default ? "-" : i.IssueDateUtc.ToString("yyyy-MM-dd"))</td>
+                <td>
+                    <button class="btn btn-primary btn-sm"
+                            @onclick="() => IssueAndSendAsync(i.Id)"
+                            disabled="@(i.Status != InvoiceStatus.Draft)">
+                        Issue &amp; Send
+                    </button>
+                    @if (!string.IsNullOrEmpty(i.PdfPath))
+                    {
+                        <a class="btn btn-outline-secondary btn-sm ms-1" target="_blank" href="@Files.GetPublicUrl(i.PdfPath)">PDF</a>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<Invoice>? _list;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _list = await Db.Invoices.Include(i => i.Customer).Include(i => i.Items)
+            .OrderByDescending(i => i.Id)
+            .ToListAsync();
+    }
+
+    private async Task IssueAndSendAsync(long id)
+    {
+        var inv = await InvoiceSvc.GetAsync(id);
+        if (inv.Status == InvoiceStatus.Draft)
+            await InvoiceSvc.IssueAsync(inv.Id);
+
+        var pdf = await PdfSvc.GenerateInvoicePdfAsync(inv, inv.Customer!);
+        var filePath = await Files.SaveAsync($"{inv.InvoiceNumber}.pdf", pdf);
+        inv.PdfPath = filePath;
+
+        var viewLink = Files.GetPublicUrl(filePath);
+        var ok = await Email.SendInvoiceEmailAsync(inv, inv.Customer!, pdf, viewLink);
+        await InvoiceSvc.MarkSentAsync(inv.Id);
+
+        _list = await Db.Invoices.Include(i => i.Customer).Include(i => i.Items)
+            .OrderByDescending(i => i.Id).ToListAsync();
+        StateHasChanged();
+
+        Nav.NavigateTo("/outbox", forceLoad: true);
+    }
+}
