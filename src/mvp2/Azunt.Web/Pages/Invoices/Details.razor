@@ -1,0 +1,287 @@
+@page "/invoices/details/{Id:long}"
+@inject BillingDbContext Db
+@inject IInvoiceService InvoiceSvc
+@inject IInvoicePdfService PdfSvc
+@inject IFileStorage Files
+@inject IEmailSender Email
+@inject NavigationManager Nav
+
+@using Microsoft.EntityFrameworkCore
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private Invoice? _inv;
+    private bool _busy;
+    private bool IsEditable => _inv?.Status == InvoiceStatus.Draft;
+
+    // Header edit state
+    private List<Customer> _customers = new();
+    private DateTime? _editDueDate;
+    private long _editCustomerId;
+
+    // Item edit state
+    private long _editItemId;
+    private ItemEdit _itemEdit = new();
+    private ItemEdit _itemNew  = new() { Quantity = 1, UnitPrice = 0 };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _inv = await InvoiceSvc.GetAsync(Id);
+        _customers = await Db.Customers.OrderBy(c => c.OrganizationName).ToListAsync();
+        _editDueDate = _inv.DueDateUtc;
+        _editCustomerId = _inv.CustomerId;
+        StateHasChanged();
+    }
+
+    private async Task SaveHeaderAsync()
+    {
+        if (_inv is null) return;
+        await InvoiceSvc.UpdateInvoiceInfoAsync(_inv.Id, _editDueDate, _editCustomerId);
+        await LoadAsync();
+    }
+
+    private void BeginEditItem(InvoiceItem it)
+    {
+        _editItemId = it.Id;
+        _itemEdit = new ItemEdit { Id = it.Id, Description = it.Description, Quantity = it.Quantity, UnitPrice = it.UnitPrice };
+    }
+
+    private void CancelEditItem()
+    {
+        _editItemId = 0;
+        _itemEdit = new();
+    }
+
+    private async Task SaveItemAsync()
+    {
+        if (_inv is null || _editItemId == 0) return;
+        await InvoiceSvc.UpdateItemAsync(_inv.Id, _itemEdit.Id, _itemEdit.Description, _itemEdit.Quantity, _itemEdit.UnitPrice);
+        _editItemId = 0;
+        _itemEdit = new();
+        await LoadAsync();
+    }
+
+    private async Task RemoveItemAsync(long itemId)
+    {
+        if (_inv is null) return;
+        await InvoiceSvc.RemoveItemAsync(_inv.Id, itemId);
+        await LoadAsync();
+    }
+
+    private async Task AddItemAsync()
+    {
+        if (_inv is null) return;
+        if (string.IsNullOrWhiteSpace(_itemNew.Description) || _itemNew.Quantity <= 0) return;
+        await InvoiceSvc.AddItemAsync(_inv.Id, _itemNew.Description, _itemNew.Quantity, _itemNew.UnitPrice);
+        _itemNew = new ItemEdit { Quantity = 1, UnitPrice = 0 };
+        await LoadAsync();
+    }
+
+    private async Task IssueAsync()
+    {
+        if (_inv is null) return;
+        _busy = true;
+        await InvoiceSvc.IssueAsync(_inv.Id);
+        await LoadAsync();
+        _busy = false;
+    }
+
+    private async Task RegeneratePdfAsync()
+    {
+        if (_inv is null || _inv.Customer is null) return;
+        _busy = true;
+        var pdf = await PdfSvc.GenerateInvoicePdfAsync(_inv, _inv.Customer);
+        var path = await Files.SaveAsync($"{_inv.InvoiceNumber}.pdf", pdf);
+        _inv.PdfPath = path;
+        await Db.SaveChangesAsync();
+        await LoadAsync();
+        _busy = false;
+    }
+
+    private async Task SendEmailAsync()
+    {
+        if (_inv is null || _inv.Customer is null) return;
+        _busy = true;
+        if (_inv.Status == InvoiceStatus.Draft)
+            await InvoiceSvc.IssueAsync(_inv.Id);
+
+        if (string.IsNullOrEmpty(_inv.PdfPath))
+        {
+            var pdf = await PdfSvc.GenerateInvoicePdfAsync(_inv, _inv.Customer);
+            var path = await Files.SaveAsync($"{_inv.InvoiceNumber}.pdf", pdf);
+            _inv.PdfPath = path;
+            await Db.SaveChangesAsync();
+        }
+
+        var url = Files.GetPublicUrl(_inv.PdfPath!);
+        await Email.SendInvoiceEmailAsync(_inv, _inv.Customer, System.IO.File.ReadAllBytes(_inv.PdfPath!), url);
+        await InvoiceSvc.MarkSentAsync(_inv.Id);
+        await LoadAsync();
+        _busy = false;
+        Nav.NavigateTo("/outbox", forceLoad: true);
+    }
+
+    private async Task MarkPaidAsync()
+    {
+        if (_inv is null) return;
+        _busy = true;
+        await InvoiceSvc.MarkPaidAsync(_inv.Id);
+        await LoadAsync();
+        _busy = false;
+    }
+
+    private async Task DuplicateAsDraftAsync()
+    {
+        if (_inv is null) return;
+        var draft = await InvoiceSvc.CloneAsDraftAsync(_inv.Id);
+        Nav.NavigateTo($"/invoices/edit/{draft.Id}", forceLoad: true);
+    }
+
+    public class ItemEdit
+    {
+        public long Id { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public decimal Quantity { get; set; }
+        public decimal UnitPrice { get; set; }
+    }
+}
+
+@if (_inv is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center">
+        <h3>Invoice Details</h3>
+        <div>
+            <a class="btn btn-secondary btn-sm" href="/invoices/manage">Back</a>
+            <a class="btn btn-primary btn-sm ms-2 @(IsEditable ? "" : "disabled")" href=@($"/invoices/edit/{Id}")>Edit</a>
+        </div>
+    </div>
+
+    @if (!IsEditable)
+    {
+        <div class="alert alert-warning d-flex justify-content-between align-items-center">
+            <div>This invoice is finalized and cannot be edited.</div>
+            <div>
+                <button class="btn btn-outline-primary btn-sm" @onclick="DuplicateAsDraftAsync">Duplicate as Draft</button>
+            </div>
+        </div>
+    }
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5 class="card-title">Invoice @(_inv.InvoiceNumber ?? "(unissued)")</h5>
+                    <p class="card-text mb-1"><b>Id:</b> @_inv.Id</p>
+                    <p class="card-text mb-1"><b>Status:</b> @_inv.Status</p>
+                    <p class="card-text mb-1"><b>Issued:</b> @(_inv.IssueDateUtc == default ? "-" : _inv.IssueDateUtc.ToString("yyyy-MM-dd HH:mm"))</p>
+                    <p class="card-text mb-1"><b>Email Sent:</b> @(_inv.EmailSentUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</p>
+                    <p class="card-text mb-1"><b>Customer:</b> @_inv.Customer?.OrganizationName (@_inv.Customer?.BillingEmail)</p>
+                </div>
+                <div class="col-md-6">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-5">
+                            <label class="form-label">Due date (UTC)</label>
+                            <InputDate TValue="DateTime?" class="form-control" @bind-Value="_editDueDate" disabled="@( !IsEditable )" />
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label">Customer</label>
+                            <InputSelect class="form-select" @bind-Value="_editCustomerId" disabled="@( !IsEditable )">
+                                @foreach (var c in _customers)
+                                {
+                                    <option value="@c.Id">@c.OrganizationName</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="col-md-2 d-grid">
+                            <button class="btn btn-primary" @onclick="SaveHeaderAsync" disabled="@( !IsEditable )">Save</button>
+                        </div>
+                    </div>
+                    <div class="text-end mt-3">
+                        <div class="mb-1"><b>Subtotal:</b> @_inv.Subtotal.ToString("N2") @_inv.Currency</div>
+                        <div class="mb-1"><b>Tax:</b> @_inv.Tax.ToString("N2") @_inv.Currency</div>
+                        <div class="mb-1"><b>Total:</b> <b>@_inv.Total.ToString("N2") @_inv.Currency</b></div>
+                        @if (!string.IsNullOrEmpty(_inv.PdfPath))
+                        {
+                            <a class="btn btn-outline-secondary btn-sm" target="_blank" href="@Files.GetPublicUrl(_inv.PdfPath)">Open PDF</a>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <button class="btn btn-primary me-2" disabled="@_busy" @onclick="IssueAsync">Issue</button>
+        <button class="btn btn-outline-primary me-2" disabled="@_busy" @onclick="RegeneratePdfAsync">Regenerate PDF</button>
+        <button class="btn btn-success me-2" disabled="@_busy" @onclick="SendEmailAsync">Send Email</button>
+        <button class="btn btn-outline-success" disabled="@_busy || _inv.Status != InvoiceStatus.Sent" @onclick="MarkPaidAsync">Mark Paid</button>
+    </div>
+
+    <h5>Items</h5>
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th style="width:60px">#</th>
+                <th>Description</th>
+                <th class="text-end" style="width:120px">Qty</th>
+                <th class="text-end" style="width:140px">Unit</th>
+                <th class="text-end" style="width:160px">Amount</th>
+                <th style="width:180px"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @for (var idx = 0; idx < _inv.Items.Count; idx++)
+            {
+                var item = _inv.Items[idx];
+
+                if (_editItemId == item.Id)
+                {
+                    <tr>
+                        <td>@(idx + 1)</td>
+                        <td><InputText class="form-control form-control-sm" @bind-Value="_itemEdit.Description" disabled="@( !IsEditable )" /></td>
+                        <td class="text-end"><InputNumber class="form-control form-control-sm text-end" @bind-Value="_itemEdit.Quantity" disabled="@( !IsEditable )" /></td>
+                        <td class="text-end"><InputNumber class="form-control form-control-sm text-end" @bind-Value="_itemEdit.UnitPrice" disabled="@( !IsEditable )" /></td>
+                        <td class="text-end">@((_itemEdit.Quantity * _itemEdit.UnitPrice).ToString("N2"))</td>
+                        <td class="text-end">
+                            <button class="btn btn-success btn-sm me-1" @onclick="SaveItemAsync" disabled="@( !IsEditable )">Save</button>
+                            <button class="btn btn-secondary btn-sm" @onclick="CancelEditItem" disabled="@( !IsEditable )">Cancel</button>
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    <tr>
+                        <td>@(idx + 1)</td>
+                        <td>@item.Description</td>
+                        <td class="text-end">@item.Quantity.ToString("0.##")</td>
+                        <td class="text-end">@item.UnitPrice.ToString("N2")</td>
+                        <td class="text-end">@((item.Quantity * item.UnitPrice).ToString("N2"))</td>
+                        <td class="text-end">
+                            <button class="btn btn-outline-primary btn-sm me-1" @onclick="() => BeginEditItem(item)" disabled="@( !IsEditable )">Edit</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => RemoveItemAsync(item.Id)" disabled="@( !IsEditable )">Delete</button>
+                        </td>
+                    </tr>
+                }
+            }
+
+            <tr class="table-light">
+                <td>New</td>
+                <td><InputText class="form-control form-control-sm" @bind-Value="_itemNew.Description" placeholder="Description" disabled="@( !IsEditable )" /></td>
+                <td class="text-end"><InputNumber class="form-control form-control-sm text-end" @bind-Value="_itemNew.Quantity" disabled="@( !IsEditable )" /></td>
+                <td class="text-end"><InputNumber class="form-control form-control-sm text-end" @bind-Value="_itemNew.UnitPrice" disabled="@( !IsEditable )" /></td>
+                <td class="text-end">@((_itemNew.Quantity * _itemNew.UnitPrice).ToString("N2"))</td>
+                <td class="text-end"><button class="btn btn-primary btn-sm" @onclick="AddItemAsync" disabled="@( !IsEditable )">Add</button></td>
+            </tr>
+        </tbody>
+    </table>
+}
