@@ -29,9 +29,9 @@ builder.Services.AddScoped<IFileStorage>(sp =>
         webRoot = Path.Combine(env.ContentRootPath, "wwwroot");
         Directory.CreateDirectory(webRoot);
     }
-    var root = Path.Combine(webRoot, "invoices");
+    var root = Path.Combine(webRoot, "invoicefiles");
     Directory.CreateDirectory(root);
-    return new FileSystemStorage(root, "/invoices");
+    return new FileSystemStorage(root, "/invoicefiles");
 });
 builder.Services.AddScoped<IEmailSender, FakeEmailSender>();
 
