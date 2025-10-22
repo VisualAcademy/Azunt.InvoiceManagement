@@ -1,0 +1,70 @@
+@using Microsoft.EntityFrameworkCore
+@page "/invoices/trash"
+@inject BillingDbContext Db
+@inject IInvoiceService InvoiceSvc
+@inject NavigationManager Nav
+
+<h3>Deleted Invoices (Trash)</h3>
+
+@if (_list is null)
+{
+    <p>Loading...</p>
+}
+else if (_list.Count == 0)
+{
+    <div class="alert alert-info">No deleted invoices.</div>
+}
+else
+{
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Id</th><th>No</th><th>Status</th><th>Total</th><th>Customer</th><th>Deleted</th><th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var i in _list)
+        {
+            <tr>
+                <td>@i.Id</td>
+                <td>@i.InvoiceNumber</td>
+                <td>@i.Status</td>
+                <td>@i.Total.ToString("N2") @i.Currency</td>
+                <td>@i.Customer?.OrganizationName</td>
+                <td>@(i.DeletedUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                <td>
+                    @if (CanManage)
+                    {
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => RestoreAsync(i.Id)">Restore</button>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    <a class="btn btn-secondary" href="/invoices/manage">Back</a>
+}
+
+@code {
+    private List<Invoice>? _list;
+    private bool CanManage { get; set; } = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _list = await Db.Invoices.Include(i => i.Customer).Include(i => i.Items)
+            .Where(i => i.IsDeleted)
+            .OrderByDescending(i => i.DeletedUtc)
+            .ToListAsync();
+    }
+
+    private async Task RestoreAsync(long id)
+    {
+        if (!CanManage) return;
+        await InvoiceSvc.RestoreAsync(id);
+        _list = await Db.Invoices.Include(i => i.Customer).Include(i => i.Items)
+            .Where(i => i.IsDeleted)
+            .OrderByDescending(i => i.DeletedUtc)
+            .ToListAsync();
+        StateHasChanged();
+    }
+}

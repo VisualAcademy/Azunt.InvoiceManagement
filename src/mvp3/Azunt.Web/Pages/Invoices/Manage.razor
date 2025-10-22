@@ -1,0 +1,140 @@
+@page "/invoices/manage"
+@inject BillingDbContext Db
+@inject IInvoiceService InvoiceSvc
+@inject IInvoicePdfService PdfSvc
+@inject IFileStorage Files
+@inject IEmailSender Email
+@inject NavigationManager Nav
+
+<div class="d-flex justify-content-between align-items-center">
+  <h3>Invoices</h3>
+  <a class="btn btn-success btn-sm" href="/invoices/edit">New Invoice</a>
+</div>
+<div class="mb-3"><a class="btn btn-outline-secondary btn-sm" href="/invoices/trash">Trash</a></div>
+
+@if (_list is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Id</th><th>No</th><th>Status</th><th>Total</th><th>Customer</th><th>Issued</th><th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var i in _list)
+        {
+            <tr>
+                <td><a href="/invoices/details/@i.Id">@i.Id</a></td>
+                <td>@i.InvoiceNumber</td>
+                <td>@i.Status</td>
+                <td>@i.Total.ToString("N2") @i.Currency</td>
+                <td>@i.Customer?.OrganizationName</td>
+                <td>@(i.IssueDateUtc == default ? "-" : i.IssueDateUtc.ToString("yyyy-MM-dd"))</td>
+                <td>
+                    <a class="btn btn-outline-primary btn-sm me-1" href=@($"/invoices/edit/{i.Id}")>Edit</a>
+                    <a class="btn btn-outline-danger btn-sm me-1" href="javascript:void(0)" @onclick="() => ConfirmDelete(i.Id)">Delete</a>
+                    <button class="btn btn-primary btn-sm"
+                            @onclick="() => IssueAndSendAsync(i.Id)"
+                            disabled="@(i.Status != InvoiceStatus.Draft)">
+                        Issue &amp; Send
+                    </button>
+                    @if (!string.IsNullOrEmpty(i.PdfPath))
+                    {
+                        <a class="btn btn-outline-secondary btn-sm ms-1" target="_blank" href="@Files.GetPublicUrl(i.PdfPath)">PDF</a>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+<!-- Delete Confirmation Modal -->
+@if (ShowDeleteModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Delete Invoice</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDeleteModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete invoice <strong>@PendingDeleteId</strong>? This is a <em>soft delete</em>. The generated PDF (if any) will remain intact.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
+                    <button class="btn btn-danger" @onclick="PerformDelete">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Invoice>? _list;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _list = await Db.Invoices.Include(i => i.Customer).Include(i => i.Items)
+            .Where(i => !i.IsDeleted)
+            .OrderByDescending(i => i.Id)
+            .ToListAsync();
+    }
+
+    private async Task IssueAndSendAsync(long id)
+    {
+        var inv = await InvoiceSvc.GetAsync(id);
+        if (inv.Status == InvoiceStatus.Draft)
+            await InvoiceSvc.IssueAsync(inv.Id);
+
+        var pdf = await PdfSvc.GenerateInvoicePdfAsync(inv, inv.Customer!);
+        var filePath = await Files.SaveAsync($"{inv.InvoiceNumber}.pdf", pdf);
+        inv.PdfPath = filePath;
+
+        var viewLink = Files.GetPublicUrl(filePath);
+        var ok = await Email.SendInvoiceEmailAsync(inv, inv.Customer!, pdf, viewLink);
+        await InvoiceSvc.MarkSentAsync(inv.Id);
+
+        _list = await Db.Invoices.Include(i => i.Customer).Include(i => i.Items)
+            .Where(i => !i.IsDeleted)
+            .OrderByDescending(i => i.Id).ToListAsync();
+        StateHasChanged();
+
+        Nav.NavigateTo("/outbox", forceLoad: true);
+    }
+    // === Soft Delete helpers ===
+    private bool ShowDeleteModal { get; set; }
+    private long PendingDeleteId { get; set; }
+    private bool CanManage { get; set; } = true; // no auth wired yet
+
+    private void ConfirmDelete(long id)
+    {
+        if (!CanManage) return;
+        PendingDeleteId = id;
+        ShowDeleteModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseDeleteModal()
+    {
+        ShowDeleteModal = false;
+        PendingDeleteId = 0;
+    }
+
+    private async Task PerformDelete()
+    {
+        if (!CanManage || PendingDeleteId == 0) { CloseDeleteModal(); return; }
+        await InvoiceSvc.SoftDeleteAsync(PendingDeleteId);
+        CloseDeleteModal();
+        _list = await Db.Invoices.Include(i => i.Customer).Include(i => i.Items)
+            .Where(i => !i.IsDeleted)
+            .OrderByDescending(i => i.Id).ToListAsync();
+        StateHasChanged();
+    }
+
+}
