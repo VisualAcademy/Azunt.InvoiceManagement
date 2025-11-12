@@ -1,5 +1,7 @@
 namespace Azunt.Web.Billing.Domain;
-public class Customer {
+
+public class Customer
+{
     public long Id { get; set; }
     public string TenantId { get; set; } = default!;
     public string OrganizationName { get; set; } = default!;

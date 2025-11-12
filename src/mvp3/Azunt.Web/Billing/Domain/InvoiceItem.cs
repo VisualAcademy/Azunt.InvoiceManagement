@@ -1,5 +1,6 @@
 namespace Azunt.Web.Billing.Domain;
-public class InvoiceItem {
+public class InvoiceItem
+{
     public long Id { get; set; }
     public long InvoiceId { get; set; }
     public string Description { get; set; } = default!;

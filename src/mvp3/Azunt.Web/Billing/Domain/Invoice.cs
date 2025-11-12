@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 
 namespace Azunt.Web.Billing.Domain;
-public class Invoice {
+public class Invoice
+{
     public long Id { get; set; }
     public string TenantId { get; set; } = default!;
     public long CustomerId { get; set; }
@@ -25,7 +26,8 @@ public class Invoice {
     public DateTime? DeletedUtc { get; set; }
     public Customer? Customer { get; set; }
     public List<InvoiceItem> Items { get; set; } = new();
-    public void RecalculateTotals(decimal? taxRate = null) {
+    public void RecalculateTotals(decimal? taxRate = null)
+    {
         Subtotal = Items.Sum(i => Math.Round(i.Quantity * i.UnitPrice, 2));
         var rate = taxRate ?? TaxRate;
         if (!ApplyTax || rate <= 0) { Tax = 0; }
