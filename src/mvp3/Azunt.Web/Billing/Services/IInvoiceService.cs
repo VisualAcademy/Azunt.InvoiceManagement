@@ -3,7 +3,8 @@ using System.Threading.Tasks;
 using Azunt.Web.Billing.Domain;
 
 namespace Azunt.Web.Billing.Services;
-public interface IInvoiceService {
+public interface IInvoiceService
+{
     Task<Invoice> GetAsync(long id);
     Task<Invoice> CreateDraftAsync(string tenantId, long customerId, string currency = "USD");
     Task AddItemAsync(long invoiceId, string description, decimal qty, decimal unitPrice);

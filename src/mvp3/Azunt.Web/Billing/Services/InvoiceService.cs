@@ -6,11 +6,13 @@ using Azunt.Web.Billing.Data;
 using Azunt.Web.Billing.Domain;
 
 namespace Azunt.Web.Billing.Services;
-public class InvoiceService : IInvoiceService {
+public class InvoiceService : IInvoiceService
+{
     private readonly BillingDbContext _db;
     private readonly IInvoiceNumberService _num;
 
-    public InvoiceService(BillingDbContext db, IInvoiceNumberService num) {
+    public InvoiceService(BillingDbContext db, IInvoiceNumberService num)
+    {
         _db = db;
         _num = num;
     }
@@ -19,8 +21,10 @@ public class InvoiceService : IInvoiceService {
         _db.Invoices.Include(i => i.Items).Include(i => i.Customer)
             .FirstAsync(i => i.Id == id);
 
-    public async Task<Invoice> CreateDraftAsync(string tenantId, long customerId, string currency = "USD") {
-        var inv = new Invoice {
+    public async Task<Invoice> CreateDraftAsync(string tenantId, long customerId, string currency = "USD")
+    {
+        var inv = new Invoice
+        {
             TenantId = tenantId,
             CustomerId = customerId,
             Currency = currency,
@@ -31,7 +35,8 @@ public class InvoiceService : IInvoiceService {
         return inv;
     }
 
-    public async Task AddItemAsync(long invoiceId, string description, decimal qty, decimal unitPrice) {
+    public async Task AddItemAsync(long invoiceId, string description, decimal qty, decimal unitPrice)
+    {
         var inv = await GetAsync(invoiceId);
         if (inv.Status != InvoiceStatus.Draft)
             throw new InvalidOperationException("Only Draft invoices can be modified.");
@@ -42,7 +47,8 @@ public class InvoiceService : IInvoiceService {
         await _db.SaveChangesAsync();
     }
 
-    public async Task IssueAsync(long invoiceId) {
+    public async Task IssueAsync(long invoiceId)
+    {
         var inv = await GetAsync(invoiceId);
         if (inv.Status != InvoiceStatus.Draft)
             throw new InvalidOperationException("Only Draft can be issued.");
@@ -54,7 +60,8 @@ public class InvoiceService : IInvoiceService {
         await _db.SaveChangesAsync();
     }
 
-    public async Task MarkSentAsync(long invoiceId) {
+    public async Task MarkSentAsync(long invoiceId)
+    {
         var inv = await GetAsync(invoiceId);
         if (inv.Status is not InvoiceStatus.Issued and not InvoiceStatus.Sent)
             throw new InvalidOperationException("Only Issued can be marked as Sent.");
@@ -64,7 +71,8 @@ public class InvoiceService : IInvoiceService {
         await _db.SaveChangesAsync();
     }
 
-    public async Task MarkPaidAsync(long invoiceId) {
+    public async Task MarkPaidAsync(long invoiceId)
+    {
         var inv = await GetAsync(invoiceId);
         if (inv.Status != InvoiceStatus.Sent)
             throw new InvalidOperationException("Only Sent can be marked as Paid.");
@@ -73,7 +81,8 @@ public class InvoiceService : IInvoiceService {
         await _db.SaveChangesAsync();
     }
 
-    public async Task UpdateItemAsync(long invoiceId, long itemId, string description, decimal qty, decimal unitPrice) {
+    public async Task UpdateItemAsync(long invoiceId, long itemId, string description, decimal qty, decimal unitPrice)
+    {
         var inv = await GetAsync(invoiceId);
         if (inv.Status != InvoiceStatus.Draft)
             throw new InvalidOperationException("Only Draft invoices can be modified.");
@@ -86,7 +95,8 @@ public class InvoiceService : IInvoiceService {
         await _db.SaveChangesAsync();
     }
 
-    public async Task RemoveItemAsync(long invoiceId, long itemId) {
+    public async Task RemoveItemAsync(long invoiceId, long itemId)
+    {
         var inv = await GetAsync(invoiceId);
         if (inv.Status != InvoiceStatus.Draft)
             throw new InvalidOperationException("Only Draft invoices can be modified.");
@@ -99,12 +109,14 @@ public class InvoiceService : IInvoiceService {
         await _db.SaveChangesAsync();
     }
 
-    public async Task UpdateInvoiceInfoAsync(long invoiceId, DateTime? dueDateUtc, long? customerId = null) {
+    public async Task UpdateInvoiceInfoAsync(long invoiceId, DateTime? dueDateUtc, long? customerId = null)
+    {
         var inv = await GetAsync(invoiceId);
         if (inv.Status != InvoiceStatus.Draft)
             throw new InvalidOperationException("Only Draft invoices can be modified.");
         inv.DueDateUtc = dueDateUtc;
-        if (customerId is long cid && cid != 0 && cid != inv.CustomerId) {
+        if (customerId is long cid && cid != 0 && cid != inv.CustomerId)
+        {
             if (!await _db.Customers.AnyAsync(c => c.Id == cid))
                 throw new InvalidOperationException("Customer not found.");
             inv.CustomerId = cid;
@@ -113,15 +125,18 @@ public class InvoiceService : IInvoiceService {
         await _db.SaveChangesAsync();
     }
 
-    public async Task<Invoice> CloneAsDraftAsync(long invoiceId) {
+    public async Task<Invoice> CloneAsDraftAsync(long invoiceId)
+    {
         var src = await GetAsync(invoiceId);
-        var copy = new Invoice {
+        var copy = new Invoice
+        {
             TenantId = src.TenantId,
             CustomerId = src.CustomerId,
             Currency = src.Currency,
             Status = InvoiceStatus.Draft
         };
-        foreach (var it in src.Items) {
+        foreach (var it in src.Items)
+        {
             copy.Items.Add(new InvoiceItem { Description = it.Description, Quantity = it.Quantity, UnitPrice = it.UnitPrice });
         }
         copy.RecalculateTotals();
@@ -130,9 +145,11 @@ public class InvoiceService : IInvoiceService {
         return copy;
     }
 
-    public async Task SoftDeleteAsync(long id) {
+    public async Task SoftDeleteAsync(long id)
+    {
         var inv = await _db.Invoices.FirstAsync(i => i.Id == id);
-        if (!inv.IsDeleted) {
+        if (!inv.IsDeleted)
+        {
             inv.IsDeleted = true;
             inv.DeletedUtc = DateTime.UtcNow;
             inv.UpdatedUtc = DateTime.UtcNow;
@@ -140,9 +157,11 @@ public class InvoiceService : IInvoiceService {
         }
     }
 
-    public async Task RestoreAsync(long id) {
+    public async Task RestoreAsync(long id)
+    {
         var inv = await _db.Invoices.FirstAsync(i => i.Id == id);
-        if (inv.IsDeleted) {
+        if (inv.IsDeleted)
+        {
             inv.IsDeleted = false;
             inv.DeletedUtc = null;
             inv.UpdatedUtc = DateTime.UtcNow;

@@ -3,11 +3,13 @@ using System.Threading.Tasks;
 using Azunt.Web.Billing.Domain;
 
 namespace Azunt.Web.Billing.Services;
-public class FakeEmailSender : IEmailSender {
+public class FakeEmailSender : IEmailSender
+{
     private readonly OutboxService _outbox;
     public FakeEmailSender(OutboxService outbox) { _outbox = outbox; }
 
-    public Task<bool> SendInvoiceEmailAsync(Invoice invoice, Customer customer, byte[] pdfBytes, string viewLink) {
+    public Task<bool> SendInvoiceEmailAsync(Invoice invoice, Customer customer, byte[] pdfBytes, string viewLink)
+    {
         var html = $@"
           <p>Sign in to view your <b>{customer.OrganizationName}</b> invoice.</p>
           <p><a href=""{viewLink}"">View your invoice &gt;</a></p>
@@ -19,7 +21,8 @@ public class FakeEmailSender : IEmailSender {
           </p>
           <p><a href=""{viewLink}"">Download PDF</a></p>";
 
-        _outbox.Emails.Add(new OutboxService.OutboxMail {
+        _outbox.Emails.Add(new OutboxService.OutboxMail
+        {
             To = customer.BillingEmail,
             Subject = $"Your invoice {invoice.InvoiceNumber}",
             Html = html,
