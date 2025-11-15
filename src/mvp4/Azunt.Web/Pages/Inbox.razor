@@ -1,0 +1,65 @@
+
+@page "/inbox"
+@page "/inbox/{Email?}"
+@inject InboxService InboxService
+
+@code {
+    [Parameter] public string? Email { get; set; }
+    private string emailInput = string.Empty;
+    private List<InboxService.InboxItem> items = new();
+
+    protected override void OnInitialized()
+    {
+        emailInput = Email ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(emailInput))
+        {
+            Load();
+        }
+    }
+
+    void Load()
+    {
+        items = InboxService.GetItems(emailInput);
+    }
+}
+
+<h3>Inbox (Email) — PDF Attachments</h3>
+
+<div class="mb-3">
+    <label class="form-label">Email</label>
+    <input class="form-control" @bind="emailInput" @bind:event="oninput" placeholder="you@example.com" />
+    <button class="btn btn-primary mt-2" @onclick="Load">Load</button>
+</div>
+
+@if (string.IsNullOrWhiteSpace(emailInput))
+{
+    <p class="text-muted">Enter an email to view received invoice PDFs.</p>
+}
+else if (items.Count == 0)
+{
+    <div class="alert alert-warning">No PDF attachments found for <b>@emailInput</b>.</div>
+}
+else
+{
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th>File</th>
+                <th>Source</th>
+                <th>Received (UTC)</th>
+                <th>Open</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var it in items)
+        {
+            <tr>
+                <td>@it.FileName</td>
+                <td>@it.Source</td>
+                <td>@it.CreatedUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                <td><a target="_blank" href="@it.PublicUrl">View</a></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}

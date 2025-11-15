@@ -1,0 +1,18 @@
+@inherits LayoutComponentBase
+<div class="container mt-4">
+  <h1>Invoice Demo</h1>
+  <hr/>
+  <div class="row">
+    <div class="col-3">
+      <nav class="list-group">
+        <a class="list-group-item list-group-item-action" href="/">Home</a>
+        <a class="list-group-item list-group-item-action" href="/invoices/manage">Invoices - Vendor</a>
+        <a class="list-group-item list-group-item-action" href="/outbox">Outbox - Outlook/Gmail</a>
+      
+    <a class="list-group-item list-group-item-action" href="/inbox">Inbox - Portal</a></nav>
+    </div>
+    <div class="col-9">
+      @Body
+    </div>
+  </div>
+</div>

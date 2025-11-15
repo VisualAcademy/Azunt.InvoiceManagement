@@ -1,0 +1,32 @@
+@page "/outbox"
+@inject OutboxService OutboxService
+
+<h3>Email Outbox (Demo)</h3>
+
+@if (OutboxService.Emails.Count == 0)
+{
+    <p>No emails yet.</p>
+}
+else
+{
+    foreach (var mail in Enumerable.Reverse(OutboxService.Emails))
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">@mail.Subject</h5>
+                <h6 class="card-subtitle mb-2 text-muted">To: @mail.To • @mail.CreatedUtc.ToLocalTime()</h6>
+                <div class="card-text">@((MarkupString)mail.Html)</div>
+                @if (mail.Attachments.Any())
+                {
+                    <div class="mt-2">
+                        <b>Attachments:</b>
+                        @foreach (var att in mail.Attachments)
+                        {
+                            <div><a target="_blank" href="@att.PublicUrl">@att.FileName</a></div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
