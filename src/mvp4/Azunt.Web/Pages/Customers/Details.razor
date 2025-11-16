@@ -1,0 +1,94 @@
+@page "/customers/{Id:long}"
+@inject BillingDbContext Db
+
+<h3>Customer Details</h3>
+
+<div class="alert alert-info py-2 small">
+    This page shows a single customer's profile and all invoices issued to this customer.
+</div>
+
+@if (_customer is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">@_customer.OrganizationName</h5>
+            <p class="card-text">
+                <strong>Tenant:</strong> @_customer.TenantId<br />
+                <strong>Email:</strong> @_customer.BillingEmail<br />
+                <strong>Type:</strong> @_customer.Type<br />
+                <strong>Domain:</strong> @_customer.Domain
+            </p>
+            <a class="btn btn-success btn-sm" href="@($"/invoices/new/{_customer.TenantId}/{_customer.Id}")">
+                New Invoice for this Customer
+            </a>
+            <a class="btn btn-outline-secondary btn-sm ms-2" href="/customers">Back to Customers</a>
+        </div>
+    </div>
+
+    <h5>Invoices for this Customer</h5>
+
+    @if (_invoices is null)
+    {
+        <p>Loading...</p>
+    }
+    else if (_invoices.Count == 0)
+    {
+        <div class="alert alert-info">No invoices found for this customer.</div>
+    }
+    else
+    {
+        <table class="table table-sm table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>No.</th>
+                    <th>Status</th>
+                    <th>Issue Date (UTC)</th>
+                    <th>Total</th>
+                    <th style="width: 150px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var inv in _invoices)
+            {
+                <tr>
+                    <td>@(inv.InvoiceNumber ?? inv.Id.ToString())</td>
+                    <td>@inv.Status</td>
+                    <td>@inv.IssueDateUtc.ToString("u")</td>
+                    <td>@inv.Total.ToString("N2") @inv.Currency</td>
+                    <td>
+                        <a class="btn btn-primary btn-sm me-1" href="@($"/invoices/details/{inv.Id}")">View</a>
+                        <a class="btn btn-outline-secondary btn-sm" href="@($"/invoices/edit/{inv.Id}")">Edit</a>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private Customer? _customer;
+    private List<Invoice>? _invoices;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _customer = await Db.Customers.FirstOrDefaultAsync(c => c.Id == Id);
+        if (_customer is null)
+        {
+            return;
+        }
+
+        _invoices = await Db.Invoices
+            .Include(i => i.Items)
+            .Where(i => i.CustomerId == _customer.Id && !i.IsDeleted)
+            .OrderByDescending(i => i.IssueDateUtc)
+            .ThenByDescending(i => i.Id)
+            .ToListAsync();
+    }
+}

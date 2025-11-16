@@ -1,5 +1,6 @@
 @page "/invoices/edit"
 @page "/invoices/edit/{Id:long}"
+@page "/invoices/new/{TenantId}/{CustomerId:long}"
 @inject BillingDbContext Db
 @inject IInvoiceService InvoiceSvc
 @inject IInvoicePdfService PdfSvc
@@ -8,6 +9,10 @@
 @inject NavigationManager Nav
 
 <h3>Invoice Edit</h3>
+
+<div class="alert alert-info py-2 small">
+    This page lets you create or edit an invoice, generate the PDF, and send it by email.
+</div>
 
 @if (_inv is not null)
 {
@@ -140,6 +145,8 @@ else
     void Recalc() { _inv?.RecalculateTotals(_inv?.TaxRate); StateHasChanged(); }
 
     [Parameter] public long? Id { get; set; }
+    [Parameter] public string? TenantId { get; set; }
+    [Parameter] public long? CustomerId { get; set; }
     private Invoice? _inv;
     private List<Customer> _customers = new();
 
@@ -149,9 +156,22 @@ else
     protected override async Task OnInitializedAsync()
     {
         _customers = await Db.Customers.OrderBy(c => c.OrganizationName).ToListAsync();
+
         if (Id is not null)
         {
             _inv = await InvoiceSvc.GetAsync(Id.Value);
+        }
+        else
+        {
+            if (!string.IsNullOrEmpty(TenantId))
+            {
+                _draft.TenantId = TenantId;
+            }
+
+            if (CustomerId is not null)
+            {
+                _draft.CustomerId = CustomerId.Value;
+            }
         }
     }
 

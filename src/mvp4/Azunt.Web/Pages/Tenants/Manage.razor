@@ -1,0 +1,143 @@
+@page "/tenants"
+@using System.ComponentModel.DataAnnotations
+@inject BillingDbContext Db
+
+<h3>Tenants</h3>
+
+<div class="alert alert-info py-2 small">
+    This page manages billing tenants, which are high-level accounts used to group customers and invoices.
+</div>
+
+<p class="text-muted">
+    Billing tenants derived from Customers, Invoices, and Invoice Number Sequences.
+</p>
+
+<EditForm Model="_newTenant" OnValidSubmit="CreateTenantAsync">
+    <DataAnnotationsValidator />
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">New Tenant</h5>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Tenant Key</label>
+                    <InputText class="form-control" @bind-Value="_newTenant.TenantId" />
+                    <small class="form-text text-muted">
+                        Example: Enter a billing tenant identifier such as TENANT-DEMO, HAWASO, or AZUNT.
+                    </small>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary btn-sm">Add Tenant</button>
+            </div>
+        </div>
+    </div>
+</EditForm>
+
+@if (_tenants is null)
+{
+    <p>Loading...</p>
+}
+else if (_tenants.Count == 0)
+{
+    <div class="alert alert-info">No tenants found.</div>
+}
+else
+{
+    <table class="table table-sm table-hover align-middle">
+        <thead>
+            <tr>
+                <th>Tenant</th>
+                <th>Customers</th>
+                <th>Invoices</th>
+                <th style="width: 220px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var t in _tenants)
+        {
+            <tr>
+                <td>@t.TenantId</td>
+                <td>@t.CustomerCount</td>
+                <td>@t.InvoiceCount</td>
+                <td>
+                    <a class="btn btn-primary btn-sm me-1" href="/customers">View Customers</a>
+                    <a class="btn btn-outline-secondary btn-sm" href="/invoices/manage">View Invoices</a>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<TenantInfo>? _tenants;
+    private NewTenantModel _newTenant = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var tenantIds = await Db.Customers
+            .Select(c => c.TenantId)
+            .Union(Db.Invoices.Select(i => i.TenantId))
+            .Union(Db.InvoiceNumberSequences.Select(s => s.TenantId))
+            .Distinct()
+            .OrderBy(t => t)
+            .ToListAsync();
+
+        _tenants = new List<TenantInfo>();
+
+        foreach (var tenantId in tenantIds)
+        {
+            var customerCount = await Db.Customers.CountAsync(c => c.TenantId == tenantId);
+            var invoiceCount = await Db.Invoices.CountAsync(i => i.TenantId == tenantId && !i.IsDeleted);
+
+            _tenants.Add(new TenantInfo
+            {
+                TenantId = tenantId,
+                CustomerCount = customerCount,
+                InvoiceCount = invoiceCount
+            });
+        }
+    }
+
+    private async Task CreateTenantAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newTenant.TenantId))
+        {
+            return;
+        }
+
+        var tenantId = _newTenant.TenantId.Trim();
+
+        var exists = await Db.InvoiceNumberSequences.AnyAsync(s => s.TenantId == tenantId);
+        if (!exists)
+        {
+            Db.InvoiceNumberSequences.Add(new InvoiceNumberSequence
+            {
+                TenantId = tenantId,
+                NextValue = 1
+            });
+            await Db.SaveChangesAsync();
+        }
+
+        _newTenant = new NewTenantModel();
+        await LoadAsync();
+    }
+
+    private class TenantInfo
+    {
+        public string TenantId { get; set; } = string.Empty;
+        public int CustomerCount { get; set; }
+        public int InvoiceCount { get; set; }
+    }
+
+    private class NewTenantModel
+    {
+        [Required]
+        public string TenantId { get; set; } = string.Empty;
+    }
+}

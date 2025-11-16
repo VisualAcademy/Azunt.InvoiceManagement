@@ -3,6 +3,12 @@
 @page "/inbox/{Email?}"
 @inject InboxService InboxService
 
+<h3>Email Inbox (Demo)</h3>
+
+<div class="alert alert-info py-2 small">
+    This page simulates a simple email inbox that you can filter by email address.
+</div>
+
 @code {
     [Parameter] public string? Email { get; set; }
     private string emailInput = string.Empty;
