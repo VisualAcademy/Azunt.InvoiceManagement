@@ -1,0 +1,241 @@
+
+@page "/portal/pay/{Id:long}"
+@using Azunt.Web.Billing.Data
+@using Azunt.Web.Billing.Domain
+@using Microsoft.EntityFrameworkCore
+@inject BillingDbContext Db
+@inject NavigationManager Nav
+
+<h3>Client Portal - Pay Now</h3>
+
+@if (_loading)
+{
+    <p>Loading invoice...</p>
+}
+else if (_invoice is null)
+{
+    <div class="alert alert-danger">
+        Could not find the requested invoice. It may have been deleted in this demo.
+    </div>
+    <button class="btn btn-secondary btn-sm" @onclick="BackToPortal">Back to Client Portal</button>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-7">
+            <div class="card mb-3">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="small text-muted">Invoice</div>
+                            <div class="fw-bold">
+                                @(string.IsNullOrEmpty(_invoice.InvoiceNumber) ? $"#{_invoice.Id}" : _invoice.InvoiceNumber)
+                            </div>
+                            <div class="small text-muted">
+                                @_invoice.Client?.OrganizationName
+                            </div>
+                            <div class="small text-muted">
+                                @GetEmailDisplay(_invoice)
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="small text-muted">Amount due</div>
+                            <div class="fs-4 fw-bold">@_invoice.Total.ToString("N2") @_invoice.Currency</div>
+                            <div class="small">@GetDueSummary(_invoice)</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body small">
+                    <dl class="row mb-0">
+                        <dt class="col-5">Status</dt>
+                        <dd class="col-7">@_invoice.Status</dd>
+
+                        <dt class="col-5">Issue date (UTC)</dt>
+                        <dd class="col-7">@(_invoice.IssueDateUtc == default ? "-" : _invoice.IssueDateUtc.ToString("yyyy-MM-dd"))</dd>
+
+                        <dt class="col-5">Due date (UTC)</dt>
+                        <dd class="col-7">@(_invoice.DueDateUtc?.ToString("yyyy-MM-dd") ?? "No due date")</dd>
+
+                        <dt class="col-5">Subtotal (tax excl.)</dt>
+                        <dd class="col-7">@_invoice.Subtotal.ToString("N2") @_invoice.Currency</dd>
+
+                        <dt class="col-5">Tax</dt>
+                        <dd class="col-7">@_invoice.Tax.ToString("N2") @_invoice.Currency</dd>
+                    </dl>
+                </div>
+                <div class="card-footer d-flex justify-content-between align-items-center">
+                    <a class="btn btn-outline-secondary btn-sm"
+                       href="@($"/invoices/details/{_invoice.Id}")"
+                       target="_blank">
+                        View invoice details
+                    </a>
+                    <button class="btn btn-link btn-sm" @onclick="BackToPortal">
+                        Back to Client Portal
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-5">
+            <div class="card mb-3">
+                <div class="card-header">
+                    Choose payment method
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted">
+                        Use this page to pay your invoice securely.
+                        <b>Pay Now</b> will open a card payment page powered by Stripe.
+                        <b>Pay with Check (Mail a Check)</b> or <b>Pay with Bank Transfer</b> will show offline payment instructions,
+                        and your invoice will be marked as <b>Paid</b> later by a portal administrator after funds are received.
+                    </p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-dark"
+                                disabled="@_busy"
+                                @onclick="PayWithStripeAsync">
+                            Pay Now
+                        </button>
+
+                        <button class="btn btn-outline-primary"
+                                disabled="@_busy"
+                                @onclick="PayWithCheckAsync">
+                            Pay with Check (Mail a Check)
+                        </button>
+
+                        <button class="btn btn-outline-secondary"
+                                disabled="@_busy"
+                                @onclick="PayWithBankTransferAsync">
+                            Pay with Bank Transfer
+                        </button>
+                    </div>
+
+                </div>
+                <div class="card-footer">
+                    @if (!string.IsNullOrEmpty(_statusMessage))
+                    {
+                        <div class="alert alert-success py-2 small mb-0">
+                            @_statusMessage
+                        </div>
+                    }
+                    else if (_invoice.Status == InvoiceStatus.Paid)
+                    {
+                        <div class="alert alert-success py-2 small mb-0">
+                            This invoice is already marked as paid in the demo data.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="small text-muted">
+                            Typical production systems would redirect to the real Stripe/PayPal hosted checkout page here.
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="card small">
+                <div class="card-header">
+                    Contact &amp; follow-up (sample)
+                </div>
+                <div class="card-body">
+                    <p class="mb-1"><b>Salesperson</b>: Mitchell Admin</p>
+                    <p class="mb-1"><b>Location</b>: Scanton, United States</p>
+                    <p class="mb-1"><b>Phone</b>: +1 555-555-5555</p>
+                    <p class="mb-0 text-muted">
+                        This section is inspired by Odoo's portal: show who owns the invoice
+                        and how the client can send a message or request support.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private Invoice? _invoice;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 기존에 작성하신 로딩 코드 그대로 두시면 됩니다.
+        _invoice = await Db.Invoices
+            .Include(i => i.Client)
+            .FirstOrDefaultAsync(i => i.Id == Id && !i.IsDeleted);
+
+        _loading = false;
+    }
+
+    // 🔹 버튼에서 직접 호출할 래퍼 메서드 3개
+    private void PayWithStripeAsync() => Nav.NavigateTo($"/payments/stripe-checkout/{Id}", forceLoad: true);
+    private void PayWithCheckAsync() => Nav.NavigateTo($"/portal/pay-by-check/{Id}", forceLoad: true);
+    // private Task PayWithBankTransferAsync() => CompletePaymentAsync("Bank transfer");
+    private void PayWithBankTransferAsync() => Nav.NavigateTo($"/portal/pay-by-bank-transfer/{Id}", forceLoad: true);
+
+    // 🔹 실제 결제 완료(데모) 처리 메서드
+    private async Task CompletePaymentAsync(string provider)
+    {
+        if (_invoice is null || _busy) return;
+
+        _busy = true;
+        _statusMessage = null;
+
+        try
+        {
+            if (_invoice.Status != InvoiceStatus.Paid)
+            {
+                _invoice.Status = InvoiceStatus.Paid;
+                await Db.SaveChangesAsync();
+            }
+
+            _statusMessage =
+                $"Payment completed via {provider}. (Demo only - no real payment processed.)";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void BackToPortal()
+    {
+        var email = GetEmailDisplay(_invoice);
+        if (!string.IsNullOrWhiteSpace(email) && email != "-")
+        {
+            Nav.NavigateTo($"/portal?email={Uri.EscapeDataString(email)}");
+            return;
+        }
+
+        Nav.NavigateTo("/portal");
+    }
+
+    private static string GetEmailDisplay(Invoice? inv)
+        => inv is null
+            ? "-"
+            : (!string.IsNullOrWhiteSpace(inv.Email)
+                ? inv.Email
+                : (inv.Client?.BillingEmail ?? "-"));
+
+    private static string GetDueSummary(Invoice inv)
+    {
+        if (inv.DueDateUtc is null)
+        {
+            return "No due date";
+        }
+
+        var today = DateTime.UtcNow.Date;
+        var due = inv.DueDateUtc.Value.Date;
+        var days = (due - today).TotalDays;
+
+        if (days > 0)
+        {
+            return $"Due in {days:0} days";
+        }
+        if (Math.Abs(days) < 0.5)
+        {
+            return "Due today";
+        }
+        return $"Overdue by {Math.Abs(days):0} days";
+    }
+}

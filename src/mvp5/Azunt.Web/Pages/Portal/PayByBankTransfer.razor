@@ -1,0 +1,151 @@
+@page "/portal/pay-by-bank-transfer/{Id:long}"
+@using Azunt.Web.Billing.Data
+@using Azunt.Web.Billing.Domain
+@using Microsoft.EntityFrameworkCore
+@inject BillingDbContext Db
+@inject NavigationManager Nav
+
+<h3>Pay with Bank Transfer</h3>
+
+@if (_loading)
+{
+    <p>Loading invoice...</p>
+}
+else if (_invoice is null)
+{
+    <div class="alert alert-danger">
+        Invoice could not be found. Please contact support if you believe this is an error.
+    </div>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-7">
+            <div class="card mb-3">
+                <div class="card-header">
+                    Bank transfer instructions (Hawaso - sample)
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted">
+                        Use these instructions if you would like to pay this invoice by bank transfer
+                        (for example, ACH or wire transfer through your bank). Your invoice will be marked
+                        as <b>Paid</b> later by a portal administrator after the funds have been received
+                        and matched to this invoice.
+                    </p>
+
+                    <dl class="row mb-3">
+                        <dt class="col-4">Amount to transfer</dt>
+                        <dd class="col-8">
+                            @_invoice.Total.ToString("N2") @_invoice.Currency
+                        </dd>
+
+                        <dt class="col-4">Invoice number</dt>
+                        <dd class="col-8">
+                            @_invoice.InvoiceNumber
+                        </dd>
+
+                        <dt class="col-4">Client</dt>
+                        <dd class="col-8">
+                            @_invoice.Client?.OrganizationName
+                        </dd>
+                    </dl>
+
+                    <hr />
+
+                    <h5 class="h6">Beneficiary (account holder)</h5>
+                    <p class="mb-2">
+                        <strong>Hawaso Gaming Authority</strong>
+                        <span class="text-muted small">(sample)</span>
+                    </p>
+
+                    <h5 class="h6">Bank details</h5>
+                    <dl class="row mb-3">
+                        <dt class="col-4">Bank name</dt>
+                        <dd class="col-8">Sample Bank N.A.</dd>
+
+                        <dt class="col-4">Routing number</dt>
+                        <dd class="col-8">000000000 (sample)</dd>
+
+                        <dt class="col-4">Account number</dt>
+                        <dd class="col-8">000000000000 (sample)</dd>
+
+                        <dt class="col-4">SWIFT / BIC</dt>
+                        <dd class="col-8">SAMPLEUS00 (if applicable)</dd>
+                    </dl>
+
+                    <p class="small text-muted mb-2">
+                        <em>
+                            Replace these bank details with the actual Hawaso bank account information used for
+                            incoming transfers.
+                        </em>
+                    </p>
+
+                    <h5 class="h6">Payment reference</h5>
+                    <p class="mb-0">
+                        Please include <b>Invoice @_invoice.InvoiceNumber</b> and your organization name as the
+                        payment reference so that the transfer can be matched correctly.
+                    </p>
+                </div>
+            </div>
+
+            <button class="btn btn-link" @onclick="BackToPayNow">
+                &laquo; Back to Pay Now
+            </button>
+        </div>
+
+        <div class="col-md-5">
+            <div class="card">
+                <div class="card-header">
+                    Invoice summary
+                </div>
+                <div class="card-body">
+                    <div class="mb-2">
+                        <div class="small text-muted">Invoice</div>
+                        <div class="fw-bold">
+                            @(string.IsNullOrEmpty(_invoice.InvoiceNumber) ? $"#{_invoice.Id}" : _invoice.InvoiceNumber)
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <div class="small text-muted">Client</div>
+                        <div>@_invoice.Client?.OrganizationName</div>
+                        <div class="small text-muted">@_invoice.Client?.BillingEmail</div>
+                    </div>
+
+                    <div class="mb-2">
+                        <div class="small text-muted">Amount due</div>
+                        <div class="fs-5 fw-bold">
+                            @_invoice.Total.ToString("N2") @_invoice.Currency
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <div class="small text-muted">Due date</div>
+                        <div>@(_invoice.DueDateUtc?.ToString("yyyy-MM-dd") ?? "N/A")</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private Invoice? _invoice;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _invoice = await Db.Invoices
+            .Include(i => i.Client)
+            .FirstOrDefaultAsync(i => i.Id == Id && !i.IsDeleted);
+
+        _loading = false;
+    }
+
+    private void BackToPayNow()
+    {
+        Nav.NavigateTo($"/portal/pay/{Id}", forceLoad: true);
+    }
+}

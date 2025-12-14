@@ -1,0 +1,196 @@
+
+@page "/portal/invoices"
+@using Azunt.Web.Billing.Data
+@using Azunt.Web.Billing.Domain
+@using Microsoft.EntityFrameworkCore
+@inject BillingDbContext Db
+
+<h3>Client Portal - Invoice Overview</h3>
+
+<div class="alert alert-info py-2 small">
+    This page provides a high-level overview of all invoices issued in the demo.
+    You can quickly see unpaid and overdue invoices and drill down to the underlying records.
+</div>
+
+<div class="card mb-3">
+    <div class="card-body row g-2 align-items-center small">
+        <div class="col-md-3">
+            <label class="form-label">Filter</label>
+            <select class="form-select form-select-sm" @bind="_filterMode">
+                <option value="Open">Open (Draft / Issued / Sent)</option>
+                <option value="Paid">Paid only</option>
+                <option value="All">All invoices</option>
+            </select>
+        </div>
+        <div class="col-md-9 text-end">
+            <span class="me-3">
+                <span class="badge bg-danger">&nbsp;</span>
+                <span class="small">Overdue</span>
+            </span>
+            <span class="me-3">
+                <span class="badge bg-warning text-dark">&nbsp;</span>
+                <span class="small">Due soon (within 7 days)</span>
+            </span>
+            <span>
+                <span class="badge bg-light border">&nbsp;</span>
+                <span class="small">Other</span>
+            </span>
+        </div>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <p>Loading invoices...</p>
+}
+else if (_all.Count == 0)
+{
+    <div class="alert alert-warning py-2 small">
+        No invoices have been created in this demo yet.
+    </div>
+}
+else
+{
+    <table class="table table-sm table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>Tenant</th>
+                <th>Client</th>
+                <th>Email</th>
+                <th>Invoice</th>
+                <th>Status</th>
+                <th>Invoice date (UTC)</th>
+                <th>Due date (UTC)</th>
+                <th>Due status</th>
+                <th class="text-end">Subtotal</th>
+                <th class="text-end">Tax</th>
+                <th class="text-end">Total</th>
+                <th style="width: 140px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var inv in FilteredInvoices)
+        {
+            var rowClass = GetRowCss(inv);
+            <tr class="@rowClass">
+                <td>@GetTenantDisplay(inv)</td>
+                <td>@GetClientDisplay(inv)</td>
+                <td>@GetEmailDisplay(inv)</td>
+                <td>@(inv.InvoiceNumber ?? inv.Id.ToString())</td>
+                <td>@inv.Status</td>
+                <td>@(inv.IssueDateUtc == default ? "-" : inv.IssueDateUtc.ToString("yyyy-MM-dd"))</td>
+                <td>@(inv.DueDateUtc?.ToString("yyyy-MM-dd") ?? "-")</td>
+                <td>@GetDueSummary(inv)</td>
+                <td class="text-end">@inv.Subtotal.ToString("N2") @inv.Currency</td>
+                <td class="text-end">@inv.Tax.ToString("N2") @inv.Currency</td>
+                <td class="text-end fw-bold">@inv.Total.ToString("N2") @inv.Currency</td>
+                <td>
+                    <a class="btn btn-outline-secondary btn-sm me-1"
+                       href="@($"/invoices/details/{inv.Id}")"
+                       target="_blank">
+                        View
+                    </a>
+                    <a class="btn btn-success btn-sm"
+                       href="@($"/portal/pay/{inv.Id}")">
+                        Pay Now
+                    </a>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<Invoice> _all = new();
+    private string _filterMode = "Open";
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            _all = await Db.Invoices
+                .Include(i => i.Client)
+                .Where(i => !i.IsDeleted)
+                .OrderByDescending(i => i.IssueDateUtc)
+                .ToListAsync();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private IEnumerable<Invoice> FilteredInvoices
+        => _filterMode switch
+        {
+            "Paid" => _all.Where(i => i.Status == InvoiceStatus.Paid),
+            "All" => _all,
+            _ => _all.Where(i => i.Status != InvoiceStatus.Paid && i.Status != InvoiceStatus.Void)
+        };
+
+    private static string GetDueSummary(Invoice inv)
+    {
+        if (inv.DueDateUtc is null)
+        {
+            return "No due date";
+        }
+
+        var today = DateTime.UtcNow.Date;
+        var due = inv.DueDateUtc.Value.Date;
+        var days = (due - today).TotalDays;
+
+        if (days > 0)
+        {
+            return $"Due in {days:0} days";
+        }
+        if (Math.Abs(days) < 0.5)
+        {
+            return "Due today";
+        }
+        return $"Overdue by {Math.Abs(days):0} days";
+    }
+
+    private static bool IsOverdue(Invoice inv)
+    {
+        return inv.DueDateUtc.HasValue &&
+               inv.DueDateUtc.Value.Date < DateTime.UtcNow.Date &&
+               inv.Status != InvoiceStatus.Paid &&
+               inv.Status != InvoiceStatus.Void;
+    }
+
+    private static bool IsDueSoon(Invoice inv, int daysThreshold = 7)
+    {
+        if (inv.DueDateUtc is null) return false;
+        var today = DateTime.UtcNow.Date;
+        var due = inv.DueDateUtc.Value.Date;
+        var diff = (due - today).TotalDays;
+        return diff >= 0 && diff <= daysThreshold &&
+               inv.Status != InvoiceStatus.Paid &&
+               inv.Status != InvoiceStatus.Void;
+    }
+
+    private static string GetRowCss(Invoice inv)
+    {
+        if (IsOverdue(inv)) return "table-danger";
+        if (IsDueSoon(inv)) return "table-warning";
+        return string.Empty;
+    }
+
+    private static string GetTenantDisplay(Invoice inv)
+        => !string.IsNullOrWhiteSpace(inv.TenantName)
+            ? inv.TenantName
+            : (!string.IsNullOrWhiteSpace(inv.TenantId) ? inv.TenantId : "-");
+
+    private static string GetClientDisplay(Invoice inv)
+        => !string.IsNullOrWhiteSpace(inv.ClientName)
+            ? inv.ClientName!
+            : (inv.Client?.OrganizationName ?? "-");
+
+    private static string GetEmailDisplay(Invoice inv)
+        => !string.IsNullOrWhiteSpace(inv.Email)
+            ? inv.Email
+            : (inv.Client?.BillingEmail ?? "-");
+}

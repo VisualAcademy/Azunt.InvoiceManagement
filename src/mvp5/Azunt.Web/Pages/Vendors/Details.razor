@@ -1,0 +1,125 @@
+@page "/vendors/details/{Email}"
+
+@inject BillingDbContext Db
+@inject NavigationManager Nav
+
+@using Microsoft.EntityFrameworkCore
+
+<h3>Vendor Details (Fake)</h3>
+
+<ul class="nav nav-tabs">
+    <li class="nav-item">
+        <a class="nav-link @(ActiveTab == "profile" ? "active" : "")" href="#" @onclick='() => SetTab("profile")'>Profile</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link @(ActiveTab == "invoices" ? "active" : "")" href="#" @onclick='() => SetTab("invoices")'>Invoices</a>
+    </li>
+</ul>
+
+<div class="border border-top-0 p-3">
+    @if (ActiveTab == "profile")
+    {
+        <div class="alert alert-secondary py-2 small mb-0">
+            <div><b>TenantName:</b> @TenantName</div>
+            <div><b>Email:</b> @Email</div>
+            @if (!string.IsNullOrWhiteSpace(Name))
+            {
+                <div><b>Organization:</b> @Name</div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="small text-muted">Invoices for this Vendor (TenantName + Email)</div>
+            <button class="btn btn-success btn-sm" @onclick="AddInvoice">Add Invoice</button>
+        </div>
+
+        @if (_list is null)
+        {
+            <p>Loading...</p>
+        }
+        else if (_list.Count == 0)
+        {
+            <div class="alert alert-info">No invoices yet.</div>
+        }
+        else
+        {
+            <table class="table table-sm table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Id</th>
+                        <th>No</th>
+                        <th>Status</th>
+                        <th>Total</th>
+                        <th>Issued</th>
+                        <th style="width: 120px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var i in _list)
+                {
+                    <tr>
+                        <td>@i.Id</td>
+                        <td>@i.InvoiceNumber</td>
+                        <td>@i.Status</td>
+                        <td>@i.Total.ToString("N2") @i.Currency</td>
+                        <td>@(i.IssueDateUtc == default ? "-" : i.IssueDateUtc.ToString("yyyy-MM-dd"))</td>
+                        <td>
+                            <a class="btn btn-outline-secondary btn-sm" href="/invoices/details/@i.Id">View</a>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string Email { get; set; } = string.Empty;
+    [Parameter, SupplyParameterFromQuery] public string? TenantName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? Name { get; set; }
+
+    private string ActiveTab { get; set; } = "profile";
+    private List<Azunt.Web.Billing.Domain.Invoice>? _list;
+
+    protected override Task OnParametersSetAsync() => Task.CompletedTask;
+
+    private async void SetTab(string tab)
+    {
+        ActiveTab = tab;
+        if (ActiveTab == "invoices")
+        {
+            await LoadInvoicesAsync();
+        }
+        StateHasChanged();
+    }
+
+    private async Task LoadInvoicesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(TenantName) || string.IsNullOrWhiteSpace(Email))
+        {
+            _list = new();
+            return;
+        }
+
+        _list = await Db.Invoices
+            .Include(i => i.Items)
+            .Where(i => !i.IsDeleted && i.TenantName == TenantName && i.Email == Email)
+            .OrderByDescending(i => i.Id)
+            .ToListAsync();
+    }
+
+    private void AddInvoice()
+    {
+        if (string.IsNullOrWhiteSpace(TenantName) || string.IsNullOrWhiteSpace(Email))
+        {
+            return;
+        }
+
+        var url = $"/invoices/new?TenantName={Uri.EscapeDataString(TenantName)}&Email={Uri.EscapeDataString(Email)}&ClientType=Vendor";
+        if (!string.IsNullOrWhiteSpace(Name)) url += $"&ClientName={Uri.EscapeDataString(Name)}";
+        Nav.NavigateTo(url);
+    }
+}

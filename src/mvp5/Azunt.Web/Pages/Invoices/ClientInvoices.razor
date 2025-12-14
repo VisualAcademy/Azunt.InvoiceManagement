@@ -1,0 +1,115 @@
+@page "/invoices/client"
+@inject BillingDbContext Db
+@inject NavigationManager Nav
+
+@using System
+@using Microsoft.EntityFrameworkCore
+
+<h3>Client Invoices</h3>
+
+@if (string.IsNullOrWhiteSpace(TenantName) || string.IsNullOrWhiteSpace(Email))
+{
+    <div class="alert alert-warning">
+        TenantName and Email are required.
+    </div>
+}
+else
+{
+    <div class="alert alert-secondary py-2 small">
+        <div><b>Tenant:</b> @TenantName</div>
+        <div><b>Email:</b> @Email</div>
+        @if (!string.IsNullOrWhiteSpace(ClientName))
+        {
+            <div><b>Client:</b> @ClientName</div>
+        }
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <div></div>
+        <button class="btn btn-success btn-sm" @onclick="NewInvoice">Add Invoice</button>
+    </div>
+
+    @if (_list is null)
+    {
+        <p>Loading...</p>
+    }
+    else if (_list.Count == 0)
+    {
+        <div class="alert alert-info">No invoices yet.</div>
+    }
+    else
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Id</th>
+                    <th>No</th>
+                    <th>Status</th>
+                    <th>Name</th>
+                    <th>Total</th>
+                    <th>Issued</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var i in _list)
+                {
+                    <tr>
+                        <td><a href="/invoices/details/@i.Id">@i.Id</a></td>
+                        <td>@i.InvoiceNumber</td>
+                        <td>@i.Status</td>
+                        <td>@(!string.IsNullOrWhiteSpace(i.FullName) ? i.FullName : (i.ClientName ?? "-"))</td>
+                        <td>@i.Total.ToString("N2") @i.Currency</td>
+                        <td>@(i.IssueDateUtc == default ? "-" : i.IssueDateUtc.ToString("yyyy-MM-dd"))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    [Parameter, SupplyParameterFromQuery] public string? TenantName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? Email { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? ClientName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? ClientType { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? FirstName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? MiddleName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? LastName { get; set; }
+
+    private List<Invoice>? _list;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(TenantName) || string.IsNullOrWhiteSpace(Email))
+        {
+            _list = null;
+            return;
+        }
+
+        _list = await Db.Invoices
+            .Include(i => i.Items)
+            .Where(i => !i.IsDeleted && i.TenantName == TenantName && i.Email == Email)
+            .OrderByDescending(i => i.Id)
+            .ToListAsync();
+    }
+
+        private void NewInvoice()
+    {
+        var url = $"/invoices/new?TenantName={Uri.EscapeDataString(TenantName!)}&Email={Uri.EscapeDataString(Email!)}";
+        if (!string.IsNullOrWhiteSpace(FirstName)) url += $"&FirstName={Uri.EscapeDataString(FirstName)}";
+        if (!string.IsNullOrWhiteSpace(MiddleName)) url += $"&MiddleName={Uri.EscapeDataString(MiddleName)}";
+        if (!string.IsNullOrWhiteSpace(LastName)) url += $"&LastName={Uri.EscapeDataString(LastName)}";
+        if (!string.IsNullOrWhiteSpace(ClientName))
+            url += $"&ClientName={Uri.EscapeDataString(ClientName)}";
+        if (!string.IsNullOrWhiteSpace(ClientType))
+            url += $"&ClientType={Uri.EscapeDataString(ClientType)}";
+        if (!string.IsNullOrWhiteSpace(FirstName))
+            url += $"&FirstName={Uri.EscapeDataString(FirstName)}";
+        if (!string.IsNullOrWhiteSpace(MiddleName))
+            url += $"&MiddleName={Uri.EscapeDataString(MiddleName)}";
+        if (!string.IsNullOrWhiteSpace(LastName))
+            url += $"&LastName={Uri.EscapeDataString(LastName)}";
+
+        Nav.NavigateTo(url);
+    }
+}

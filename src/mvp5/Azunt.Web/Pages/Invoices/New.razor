@@ -1,0 +1,145 @@
+@page "/invoices/new"
+
+@inject BillingDbContext Db
+@inject Azunt.Web.Billing.Services.IInvoiceService InvoiceService
+@inject NavigationManager Nav
+
+@using Azunt.Web.Billing.Domain
+@using Microsoft.EntityFrameworkCore
+
+<h3>Create Draft Invoice</h3>
+
+<div class="alert alert-secondary py-2 small">
+    This page creates a <b>Draft</b> invoice using values provided via <b>query string</b> (TenantName/Email/ClientName/ClientType).
+    It does not require the Clients table.
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label">TenantName</label>
+                <input class="form-control" @bind="TenantName" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Email</label>
+                <input class="form-control" @bind="Email" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">ClientName (optional)</label>
+                <input class="form-control" @bind="ClientName" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">ClientType (optional)</label>
+                <input class="form-control" @bind="ClientType" />
+            </div>
+        </div>
+
+        <div class="row g-2 mt-1">
+            <div class="col-md-4">
+                <label class="form-label">FirstName (optional)</label>
+                <input class="form-control" @bind="FirstName" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">MiddleName (optional)</label>
+                <input class="form-control" @bind="MiddleName" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">LastName (optional)</label>
+                <input class="form-control" @bind="LastName" />
+            </div>
+        </div>
+
+        <div class="row g-2 mt-1 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label">Currency</label>
+                <input class="form-control" @bind="Currency" />
+            </div>
+            <div class="col-md-10 d-flex justify-content-end gap-2">
+                @if (!string.IsNullOrWhiteSpace(TenantName) && !string.IsNullOrWhiteSpace(Email))
+                {
+                    <a class="btn btn-outline-secondary" href="@ClientListUrl">Open Invoices List</a>
+                }
+                <button class="btn btn-success" @onclick="CreateDraft" disabled="@_busy">Create Draft Invoice</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-info py-2 small">
+    Tip: Use <a href="/invoices/add">Invoice New / Add Invoice</a> to simulate calls from Employees/Vendors/VendorEmployees.
+</div>
+
+@code {
+
+    // Query-string driven params (new preferred path)
+    [Parameter, SupplyParameterFromQuery] public string? TenantName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? Email { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? ClientName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? ClientType { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? FirstName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? MiddleName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? LastName { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? Currency { get; set; }
+
+    private bool _busy;
+    private string? _error;
+
+    private string ClientListUrl
+    {
+        get
+        {
+            var url = $"/invoices/client?TenantName={Uri.EscapeDataString(TenantName!)}&Email={Uri.EscapeDataString(Email!)}";
+            if (!string.IsNullOrWhiteSpace(ClientName)) url += $"&ClientName={Uri.EscapeDataString(ClientName)}";
+            if (!string.IsNullOrWhiteSpace(ClientType)) url += $"&ClientType={Uri.EscapeDataString(ClientType)}";
+            return url;
+        }
+    }
+
+    protected override Task OnParametersSetAsync()
+    {
+        // Default currency
+        Currency ??= "USD";
+        return Task.CompletedTask;
+    }
+
+    private async Task CreateDraft()
+    {
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(TenantName) || string.IsNullOrWhiteSpace(Email))
+        {
+            _error = "TenantName and Email are required.";
+            return;
+        }
+
+        try
+        {
+            _busy = true;
+            var inv = await InvoiceService.CreateDraftAsync(
+                tenantName: TenantName!.Trim(),
+                email: Email!.Trim().ToLowerInvariant(),
+                clientName: string.IsNullOrWhiteSpace(ClientName) ? null : ClientName.Trim(),
+                clientType: ClientType,
+                firstName: FirstName,
+                middleName: MiddleName,
+                lastName: LastName,
+                currency: string.IsNullOrWhiteSpace(Currency) ? "USD" : Currency);
+
+            Nav.NavigateTo($"/invoices/edit/{inv.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

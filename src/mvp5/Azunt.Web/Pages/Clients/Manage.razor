@@ -1,0 +1,207 @@
+@page "/clients"
+@inject BillingDbContext Db
+@using Microsoft.AspNetCore.Components.Authorization
+
+<h3>Clients</h3>
+
+<div class="alert alert-info py-2 small">
+    This page manages clients (vendors, vendor employees, and employees) for the selected tenant.
+</div>
+
+<p class="text-muted">
+    Simple front layer for managing Vendors, Vendor Employees, and Employees.
+</p>
+
+<div class="row mb-3">
+    <div class="col-md-4">
+        <label class="form-label">Tenant</label>
+        <InputSelect class="form-select" @bind-Value="_selectedTenantId" @onchange="OnTenantChangedAsync">
+            @foreach (var t in _tenantIds)
+            {
+                <option value="@t">@t</option>
+            }
+        </InputSelect>
+    </div>
+</div>
+
+<EditForm Model="_newClient" OnValidSubmit="CreateClientAsync">
+    <DataAnnotationsValidator />
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">New Client</h5>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Tenant</label>
+                    <div class="form-control-plaintext">@_selectedTenantId</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Name</label>
+                    <InputText class="form-control" @bind-Value="_newClient.OrganizationName" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Email</label>
+                    <InputText class="form-control" @bind-Value="_newClient.BillingEmail" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Type</label>
+                    <InputSelect class="form-select" @bind-Value="_newClient.Type">
+                        <option value="@ClientType.Vendor">Vendor</option>
+                        <option value="@ClientType.VendorEmployee">Vendor Employee</option>
+                        <option value="@ClientType.Employee">Employee</option>
+                    </InputSelect>
+                </div>
+            </div>
+            <div class="row g-3 mt-2">
+                <div class="col-md-4">
+                    <label class="form-label">Domain (optional)</label>
+                    <InputText class="form-control" @bind-Value="_newClient.Domain" />
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary btn-sm">Add Client</button>
+            </div>
+        </div>
+    </div>
+</EditForm>
+
+
+@if (_clients is null)
+{
+    <p>Loading...</p>
+}
+else if (_clients.Count == 0)
+{
+    <div class="alert alert-info">No clients found.</div>
+}
+else
+{
+    <table class="table table-sm table-hover align-middle">
+        <thead>
+            <tr>
+                <th>Tenant</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Type</th>
+                <th>Domain</th>
+                <th style="width: 220px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var c in _clients)
+        {
+            <tr>
+                <td>@c.TenantId</td>
+                <td>@c.OrganizationName</td>
+                <td>@c.BillingEmail</td>
+                <td>@c.Type</td>
+                <td>@c.Domain</td>
+                <td>
+                    <a class="btn btn-primary btn-sm me-1" href="@($"/clients/{c.Id}")">Details</a>
+                    <a class="btn btn-success btn-sm" href="@($"/invoices/new/{c.TenantId}/{c.Id}")">New Invoice</a>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<Client>? _clients;
+    private List<string> _tenantIds = new();
+    private string _selectedTenantId = string.Empty;
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    private Client _newClient = new()
+    {
+        Type = ClientType.Vendor
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTenantsAsync();
+
+        // Default tenant: from logged-in user if available, otherwise first tenant in list
+        string? defaultTenant = null;
+
+        if (AuthenticationStateTask is not null)
+        {
+            var authState = await AuthenticationStateTask;
+            var user = authState.User;
+            if (user?.Identity?.IsAuthenticated == true)
+            {
+                defaultTenant = user.FindFirst("tenant")?.Value
+                                ?? user.FindFirst("TenantName")?.Value;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(defaultTenant) && _tenantIds.Contains(defaultTenant))
+        {
+            _selectedTenantId = defaultTenant;
+        }
+        else
+        {
+            if (_tenantIds.Count == 0)
+            {
+                _tenantIds.Add("TENANT-DEMO");
+            }
+
+            _selectedTenantId = _tenantIds.First();
+        }
+
+        await LoadClientsAsync();
+    }
+
+    private async Task LoadTenantsAsync()
+    {
+        _tenantIds = await Db.Clients
+            .Select(c => c.TenantId)
+            .Union(Db.Invoices.Select(i => i.TenantId))
+            .Union(Db.InvoiceNumberSequences.Select(s => s.TenantId))
+            .Distinct()
+            .OrderBy(t => t)
+            .ToListAsync();
+    }
+
+    private async Task LoadClientsAsync()
+    {
+        _clients = await Db.Clients
+            .Where(c => c.TenantId == _selectedTenantId)
+            .OrderBy(c => c.Type)
+            .ThenBy(c => c.OrganizationName)
+            .ToListAsync();
+    }
+
+    private async Task OnTenantChangedAsync(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            _selectedTenantId = value;
+            await LoadClientsAsync();
+        }
+    }
+
+    private async Task CreateClientAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedTenantId) ||
+            string.IsNullOrWhiteSpace(_newClient.OrganizationName) ||
+            string.IsNullOrWhiteSpace(_newClient.BillingEmail))
+        {
+            return;
+        }
+
+        _newClient.TenantId = _selectedTenantId;
+
+        Db.Clients.Add(_newClient);
+        await Db.SaveChangesAsync();
+
+        await LoadClientsAsync();
+
+        _newClient = new Client
+        {
+            Type = ClientType.Vendor
+        };
+    }
+}

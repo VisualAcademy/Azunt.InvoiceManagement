@@ -1,0 +1,148 @@
+@page "/invoices/add"
+@inject NavigationManager Nav
+
+<h3>Invoice New / Add Invoice</h3>
+
+<div class="alert alert-info py-2 small">
+    This page simulates how <b>Employees</b>, <b>Vendors</b>, and <b>VendorEmployees</b> will call Invoice creation.
+    Each button navigates to <code>/invoices/new</code> with TenantName/Email (and optional client info) passed via query string.
+</div>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Employee (Fake)</h5>
+                <p class="card-text small">
+                    TenantName: <b>@EmployeeTenant</b><br />
+                    Email: <b>@EmployeeEmail</b><br />
+                    Name: <b>@EmployeeName</b>
+                </p>
+                <a class="btn btn-outline-secondary btn-sm me-2" href="@EmployeeDetailsUrl">Open Details</a>
+                <button class="btn btn-success btn-sm" @onclick='() => AddInvoiceWithName(EmployeeTenant, EmployeeEmail, EmployeeName, "Employee")'>Add Invoice</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Vendor (Fake)</h5>
+                <p class="card-text small">
+                    TenantName: <b>@VendorTenant</b><br />
+                    Email: <b>@VendorEmail</b><br />
+                    Name: <b>@VendorName</b>
+                </p>
+                <a class="btn btn-outline-secondary btn-sm me-2" href="@VendorDetailsUrl">Open Details</a>
+                <button class="btn btn-success btn-sm" @onclick='() => AddInvoiceWithName(VendorTenant, VendorEmail, VendorName, "Vendor")'>Add Invoice</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Vendor Employee (Fake)</h5>
+                <p class="card-text small">
+                    TenantName: <b>@VendorEmployeeTenant</b><br />
+                    Email: <b>@VendorEmployeeEmail</b><br />
+                    Name: <b>@VendorEmployeeName</b>
+                </p>
+                <a class="btn btn-outline-secondary btn-sm me-2" href="@VendorEmployeeDetailsUrl">Open Details</a>
+                <button class="btn btn-success btn-sm" @onclick='() => AddInvoiceWithName(VendorEmployeeTenant, VendorEmployeeEmail, VendorEmployeeName, "VendorEmployee")'>Add Invoice</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<hr />
+
+<h5>Manual (query string) starter</h5>
+
+<div class="row g-2 align-items-end">
+    <div class="col-md-3">
+        <label class="form-label">TenantName</label>
+        <input class="form-control" @bind="ManualTenant" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Email</label>
+        <input class="form-control" @bind="ManualEmail" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">ClientName (optional)</label>
+        <input class="form-control" @bind="ManualClientName" />
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">ClientType (optional)</label>
+        <input class="form-control" @bind="ManualClientType" />
+    </div>
+    <div class="col-md-1">
+        <button class="btn btn-primary w-100" @onclick="(() => AddInvoiceWithName(ManualTenant, ManualEmail, ManualClientName, ManualClientType))">Go</button>
+    </div>
+</div>
+
+@code {
+    // Fake demo data (replace with real Employee/Vendor/VendorEmployee details later)
+    private const string EmployeeTenant = "Hawaso";
+    private const string EmployeeEmail = "employee.demo@hawaso.example";
+    private const string EmployeeName = "Employee Demo";
+
+    private const string VendorTenant = "Hawaso";
+    private const string VendorEmail = "vendor.demo@hawaso.example";
+    private const string VendorName = "Vendor Demo";
+
+    private const string VendorEmployeeTenant = "Hawaso";
+    private const string VendorEmployeeEmail = "vendoremployee.demo@hawaso.example";
+    private const string VendorEmployeeName = "VendorEmployee Demo";
+
+    private string ManualTenant { get; set; } = EmployeeTenant;
+    private string ManualEmail { get; set; } = EmployeeEmail;
+    private string ManualClientName { get; set; } = EmployeeName;
+    private string ManualClientType { get; set; } = "Employee";
+
+    private string EmployeeDetailsUrl => $"/employees/details/{Uri.EscapeDataString(EmployeeEmail)}?TenantName={Uri.EscapeDataString(EmployeeTenant)}&Name={Uri.EscapeDataString(EmployeeName)}";
+    private string VendorDetailsUrl => $"/vendors/details/{Uri.EscapeDataString(VendorEmail)}?TenantName={Uri.EscapeDataString(VendorTenant)}&Name={Uri.EscapeDataString(VendorName)}";
+    private string VendorEmployeeDetailsUrl => $"/vendoremployees/details/{Uri.EscapeDataString(VendorEmployeeEmail)}?TenantName={Uri.EscapeDataString(VendorEmployeeTenant)}&Name={Uri.EscapeDataString(VendorEmployeeName)}";
+
+    private void AddInvoiceWithName(string? tenantName, string? email, string? name, string? clientType)
+    {
+        if (string.IsNullOrWhiteSpace(tenantName) || string.IsNullOrWhiteSpace(email))
+        {
+            return;
+        }
+
+        var (first, middle, last) = SplitName(name);
+
+        var url = $"/invoices/new?TenantName={Uri.EscapeDataString(tenantName)}&Email={Uri.EscapeDataString(email)}";
+
+        // For now, we keep ClientName aligned with the incoming Name so the invoice list reads nicely.
+        if (!string.IsNullOrWhiteSpace(name))
+            url += $"&ClientName={Uri.EscapeDataString(name)}";
+
+        if (!string.IsNullOrWhiteSpace(clientType))
+            url += $"&ClientType={Uri.EscapeDataString(clientType)}";
+
+        if (!string.IsNullOrWhiteSpace(first))
+            url += $"&FirstName={Uri.EscapeDataString(first)}";
+        if (!string.IsNullOrWhiteSpace(middle))
+            url += $"&MiddleName={Uri.EscapeDataString(middle)}";
+        if (!string.IsNullOrWhiteSpace(last))
+            url += $"&LastName={Uri.EscapeDataString(last)}";
+
+        Nav.NavigateTo(url);
+    }
+
+    private static (string? First, string? Middle, string? Last) SplitName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return (null, null, null);
+        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1) return (parts[0], null, null);
+        if (parts.Length == 2) return (parts[0], null, parts[1]);
+        // 3+ parts: First + Middle (everything but first/last) + Last
+        var first = parts[0];
+        var last = parts[^1];
+        // C# range syntax: 1..^1 means "from index 1 up to (but excluding) last"
+        var middle = string.Join(" ", parts[1..^1]);
+        return (first, middle, last);
+    }
+}

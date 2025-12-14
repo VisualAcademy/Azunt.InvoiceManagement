@@ -1,0 +1,283 @@
+
+@page "/portal"
+@using Azunt.Web.Billing.Data
+@using Azunt.Web.Billing.Domain
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.WebUtilities
+@using System.Linq
+@inject BillingDbContext Db
+@inject NavigationManager Nav
+
+<h3>Client Portal - Pay Now</h3>
+
+<div class="alert alert-info py-2 small">
+    This demo client portal allows a client to look up invoices by billing email, review the details,
+    and open a mock <b>Pay Now</b> checkout page (Stripe / PayPal style) without performing a real charge.
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-6">
+                <label class="form-label">Billing Email</label>
+                <input class="form-control"
+                       @bind="emailInput"
+                       @bind:event="oninput"
+                       placeholder="client@example.com" />
+                <div class="form-text">
+                    Use the same email address that invoices were sent to.
+                </div>
+            </div>
+            <div class="col-md-3">
+                <button type="button"
+                        class="btn btn-primary w-100 mb-1"
+                        @onclick="LoadInvoicesAsync"
+                        disabled="@_busy">
+                    @(_busy ? "Loading..." : "Lookup invoices")
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_message))
+{
+    <div class="alert alert-warning py-2 small">@_message</div>
+}
+
+@if (_invoices.Count == 0 && string.IsNullOrWhiteSpace(_message))
+{
+    <div class="alert alert-secondary py-2 small">
+        Enter a billing email and click <b>Lookup invoices</b> to see open and historical invoices.
+    </div>
+}
+else if (_invoices.Count > 0)
+{
+    <div class="row">
+        <div class="col-md-6">
+            <h5 class="mb-2">Invoices for <span class="text-primary">@emailInput</span></h5>
+            <table class="table table-sm table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 120px;">Invoice</th>
+                        <th>Status</th>
+                        <th>Due</th>
+                        <th class="text-end">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var inv in _invoices)
+                {
+                    var rowClass = GetRowCss(inv, _selected?.Id == inv.Id);
+                    <tr class="@rowClass" @onclick="() => SelectInvoice(inv)" style="cursor: pointer;">
+                        <td>@(inv.InvoiceNumber ?? inv.Id.ToString())</td>
+                        <td>@inv.Status</td>
+                        <td>@GetDueSummary(inv)</td>
+                        <td class="text-end">@inv.Total.ToString("N2") @inv.Currency</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="col-md-6">
+            @if (_selected is null)
+            {
+                <div class="alert alert-secondary py-2 small">
+                    Select an invoice on the left to see the full details and <b>Pay Now</b> option.
+                </div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="small text-muted">Invoice</div>
+                            <div class="fw-bold">
+                                @(string.IsNullOrEmpty(_selected.InvoiceNumber) ? $"#{_selected.Id}" : _selected.InvoiceNumber)
+                            </div>
+                            <div class="small text-muted">
+                                @(_selected.Client?.OrganizationName ?? "Unknown client")
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="small text-muted">Amount due</div>
+                            <div class="fs-5 fw-bold">@_selected.Total.ToString("N2") @_selected.Currency</div>
+                            <div class="small">@GetDueSummary(_selected)</div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <dl class="row small mb-0">
+                            <dt class="col-5">Status</dt>
+                            <dd class="col-7">@_selected.Status</dd>
+
+                            <dt class="col-5">Issue date (UTC)</dt>
+                            <dd class="col-7">@(_selected.IssueDateUtc == default ? "-" : _selected.IssueDateUtc.ToString("yyyy-MM-dd"))</dd>
+
+                            <dt class="col-5">Due date (UTC)</dt>
+                            <dd class="col-7">@(_selected.DueDateUtc?.ToString("yyyy-MM-dd") ?? "No due date")</dd>
+
+                            <dt class="col-5">Subtotal (tax excl.)</dt>
+                            <dd class="col-7">@_selected.Subtotal.ToString("N2") @_selected.Currency</dd>
+
+                            <dt class="col-5">Tax</dt>
+                            <dd class="col-7">@_selected.Tax.ToString("N2") @_selected.Currency</dd>
+
+                            <dt class="col-5">Total</dt>
+                            <dd class="col-7 fw-bold">@_selected.Total.ToString("N2") @_selected.Currency</dd>
+                        </dl>
+                    </div>
+                    <div class="card-footer d-flex justify-content-between align-items-center">
+                        <div class="small text-muted">
+                            This demo mimics a client portal like Odoo: the client reviews the invoice and chooses a preferred payment method.
+                        </div>
+                        <div class="text-end">
+                            <a class="btn btn-outline-secondary btn-sm me-2"
+                               href="@($"/invoices/details/{_selected.Id}")"
+                               target="_blank">
+                                View invoice
+                            </a>
+                            <button class="btn btn-success btn-sm"
+                                    @onclick="OpenPayNow">
+                                Pay Now
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private string emailInput = string.Empty;
+    private bool _busy;
+    private string? _message;
+    private List<Invoice> _invoices = new();
+    private Invoice? _selected;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Support deep-linking back from the Pay Now page.
+        // Example: /portal?email=client@example.com
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        if (string.IsNullOrWhiteSpace(uri.Query)) return;
+
+        var qs = QueryHelpers.ParseQuery(uri.Query);
+        if (qs.TryGetValue("email", out var values))
+        {
+            var email = values.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(email))
+            {
+                emailInput = email.Trim();
+                await LoadInvoicesAsync();
+            }
+        }
+    }
+
+    private async Task LoadInvoicesAsync()
+    {
+        _message = null;
+        _invoices.Clear();
+        _selected = null;
+
+        var email = emailInput?.Trim();
+        if (string.IsNullOrEmpty(email))
+        {
+            _message = "Please enter a billing email address.";
+            return;
+        }
+
+        // Normalize for reliable matching (handles case differences and accidental whitespace).
+        var emailLower = email.ToLowerInvariant();
+
+        _busy = true;
+        try
+        {
+            _invoices = await Db.Invoices
+                .Include(i => i.Client)
+                // NOTE:
+                // New invoices use Invoice.Email (single-source header field).
+                // Older/demo invoices may only have Client.BillingEmail.
+                .Where(i => !i.IsDeleted &&
+                            ((i.Email != null && i.Email.ToLower() == emailLower) ||
+                             (i.Client != null && i.Client.BillingEmail != null && i.Client.BillingEmail.ToLower() == emailLower)))
+                .OrderByDescending(i => i.IssueDateUtc)
+                .ToListAsync();
+
+            if (_invoices.Count == 0)
+            {
+                _message = $"No invoices found for {email}.";
+            }
+            else
+            {
+                _selected = _invoices.First();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void SelectInvoice(Invoice inv)
+    {
+        _selected = inv;
+    }
+
+    private void OpenPayNow()
+    {
+        if (_selected is null) return;
+        Nav.NavigateTo($"/portal/pay/{_selected.Id}");
+    }
+
+    private static string GetDueSummary(Invoice inv)
+    {
+        if (inv.DueDateUtc is null)
+        {
+            return "No due date";
+        }
+
+        var today = DateTime.UtcNow.Date;
+        var due = inv.DueDateUtc.Value.Date;
+        var days = (due - today).TotalDays;
+
+        if (days > 0)
+        {
+            return $"Due in {days:0} days";
+        }
+        if (Math.Abs(days) < 0.5)
+        {
+            return "Due today";
+        }
+        return $"Overdue by {Math.Abs(days):0} days";
+    }
+
+    private static bool IsOverdue(Invoice inv)
+    {
+        return inv.DueDateUtc.HasValue &&
+               inv.DueDateUtc.Value.Date < DateTime.UtcNow.Date &&
+               inv.Status != InvoiceStatus.Paid &&
+               inv.Status != InvoiceStatus.Void;
+    }
+
+    private static bool IsDueSoon(Invoice inv, int daysThreshold = 7)
+    {
+        if (inv.DueDateUtc is null) return false;
+        var today = DateTime.UtcNow.Date;
+        var due = inv.DueDateUtc.Value.Date;
+        var diff = (due - today).TotalDays;
+        return diff >= 0 && diff <= daysThreshold &&
+               inv.Status != InvoiceStatus.Paid &&
+               inv.Status != InvoiceStatus.Void;
+    }
+
+    private static string GetRowCss(Invoice inv, bool isSelected)
+    {
+        var classes = new List<string>();
+        if (isSelected) classes.Add("table-active");
+        if (IsOverdue(inv)) classes.Add("table-danger");
+        else if (IsDueSoon(inv)) classes.Add("table-warning");
+        return string.Join(" ", classes);
+    }
+}

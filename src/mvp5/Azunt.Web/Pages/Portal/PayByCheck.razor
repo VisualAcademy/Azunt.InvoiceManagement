@@ -1,0 +1,147 @@
+@page "/portal/pay-by-check/{Id:long}"
+@using Azunt.Web.Billing.Data
+@using Azunt.Web.Billing.Domain
+@using Microsoft.EntityFrameworkCore
+@inject BillingDbContext Db
+@inject NavigationManager Nav
+
+<h3>Pay with Check (Mail a Check)</h3>
+
+@if (_loading)
+{
+    <p>Loading invoice...</p>
+}
+else if (_invoice is null)
+{
+    <div class="alert alert-danger">
+        Invoice could not be found or is no longer available.
+    </div>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-7">
+            <div class="card mb-3">
+                <div class="card-header">
+                    Check payment instructions (Hawaso - sample)
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted">
+                        Use these instructions if you would like to pay this invoice by mailing a paper check.
+                        Your invoice will be marked as <b>Paid</b> later by a portal administrator after the check
+                        has been received and deposited.
+                    </p>
+
+                    <dl class="row">
+                        <dt class="col-4">Amount due</dt>
+                        <dd class="col-8">
+                            @_invoice.Total.ToString("N2") @_invoice.Currency
+                        </dd>
+
+                        <dt class="col-4">Invoice number</dt>
+                        <dd class="col-8">
+                            @_invoice.InvoiceNumber
+                        </dd>
+
+                        <dt class="col-4">Tenant</dt>
+                        <dd class="col-8">
+                            @_invoice.TenantId
+                        </dd>
+                    </dl>
+
+                    <hr />
+
+                    <h5 class="h6">Make check payable to</h5>
+                    <p class="mb-2">
+                        <strong>Hawaso Gaming Authority</strong> <span class="text-muted small">(sample)</span>
+                    </p>
+
+                    <h5 class="h6">Mailing address</h5>
+                    <address class="mb-2">
+                        Attn: Licensing / Compliance<br />
+                        1234 Sample Street<br />
+                        Milwaukee, WI 53200<br />
+                        United States
+                    </address>
+                    <p class="small text-muted mb-2">
+                        <em>Replace this address with the actual Hawaso mailing address used for check payments.</em>
+                    </p>
+
+                    <h5 class="h6">Memo line</h5>
+                    <p class="mb-2">
+                        Please include: <b>Invoice @_invoice.InvoiceNumber</b> and your organization name so that
+                        the payment can be matched correctly.
+                    </p>
+
+                    <p class="small text-muted mb-0">
+                        Once the check has cleared, the portal administrator will mark this invoice as <b>Paid</b> in the system.
+                    </p>
+                </div>
+                <div class="card-footer">
+                    <button class="btn btn-secondary btn-sm" @onclick="BackToPayNow">
+                        Back to Pay Now
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-5">
+            <div class="card mb-3">
+                <div class="card-header">
+                    Invoice summary
+                </div>
+                <div class="card-body">
+                    <div class="mb-2">
+                        <div><strong>@_invoice.Client?.OrganizationName</strong></div>
+                        <div class="small text-muted">@_invoice.Client?.BillingEmail</div>
+                    </div>
+                    <dl class="row small mb-0">
+                        <dt class="col-5">Status</dt>
+                        <dd class="col-7">@_invoice.Status</dd>
+
+                        <dt class="col-5">Issue date (UTC)</dt>
+                        <dd class="col-7">
+                            @_invoice.IssueDateUtc.ToString("yyyy-MM-dd")
+                        </dd>
+
+                        <dt class="col-5">Due date (UTC)</dt>
+                        <dd class="col-7">
+                            @(_invoice.DueDateUtc?.ToString("yyyy-MM-dd") ?? "No due date")
+                        </dd>
+
+                        <dt class="col-5">Subtotal</dt>
+                        <dd class="col-7">
+                            @_invoice.Subtotal.ToString("N2") @_invoice.Currency
+                        </dd>
+
+                        <dt class="col-5">Tax</dt>
+                        <dd class="col-7">
+                            @_invoice.Tax.ToString("N2") @_invoice.Currency
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private Invoice? _invoice;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _invoice = await Db.Invoices
+            .Include(i => i.Client)
+            .FirstOrDefaultAsync(i => i.Id == Id && !i.IsDeleted);
+
+        _loading = false;
+    }
+
+    private void BackToPayNow()
+    {
+        Nav.NavigateTo($"/portal/pay/{Id}", forceLoad: true);
+    }
+}

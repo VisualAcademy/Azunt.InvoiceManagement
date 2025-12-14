@@ -1,0 +1,93 @@
+@page "/inbox"
+@page "/inbox/{Email?}"
+@inject InboxService InboxService
+@inject BillingDbContext Db
+
+<h3>Email Inbox (Demo)</h3>
+
+<div class="alert alert-info py-2 small">
+    This page simulates a simple email inbox that you can filter by email address.
+</div>
+
+@code {
+    [Parameter] public string? Email { get; set; }
+    private string emailInput = string.Empty;
+    private List<InboxService.InboxItem> items = new();
+
+    protected override void OnInitialized()
+    {
+        emailInput = Email ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(emailInput))
+        {
+            Load();
+        }
+    }
+
+    void Load()
+    {
+        items = InboxService.GetItems(emailInput);
+    }
+
+    private bool TryGetInvoiceId(InboxService.InboxItem item, out long invoiceId)
+    {
+        invoiceId = 0;
+        if (string.IsNullOrWhiteSpace(item.FileName)) return false;
+        if (!item.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var number = item.FileName.Substring(0, item.FileName.Length - 4); // remove .pdf
+
+        var inv = Db.Invoices
+            .Include(i => i.Client)
+            .FirstOrDefault(i => i.InvoiceNumber == number && i.Client != null && i.Client.BillingEmail == item.Email);
+
+        if (inv is null) return false;
+        invoiceId = inv.Id;
+        return true;
+    }
+}
+
+<div class="mb-3">
+    <label>Email filter</label>
+    <input class="form-control" @bind="emailInput" />
+    <button class="btn btn-primary btn-sm mt-2" @onclick="Load">Load Inbox</button>
+</div>
+
+@if (string.IsNullOrWhiteSpace(emailInput))
+{
+    <div class="alert alert-warning">Please enter an email address to load the inbox.</div>
+}
+else if (items.Count == 0)
+{
+    <div class="alert alert-warning">No PDF attachments found for <b>@emailInput</b>.</div>
+}
+else
+{
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th>File</th>
+                <th>Source</th>
+                <th>Received (UTC)</th>
+                <th>Open</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var it in items)
+        {
+            <tr>
+                <td>@it.FileName</td>
+                <td>@it.Source</td>
+                <td>@it.CreatedUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                <td>
+                    <a target="_blank" href="@it.PublicUrl">View</a>
+                    @if (TryGetInvoiceId(it, out var invoiceId))
+                    {
+                        <span class="mx-1 text-muted">|</span>
+                        <a href="@($"/invoices/details/{invoiceId}")">Details</a>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
